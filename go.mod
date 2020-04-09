@@ -1,4 +1,4 @@
-module github.com/ktsakalozos/dqlite-migrator
+module github.com/ktsakalozos/migrator
 
 go 1.13
 

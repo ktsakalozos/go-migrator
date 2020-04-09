@@ -85,6 +85,8 @@ func backup(ep string, dir string) error {
 		defer dataf.Close()
 		keyf.Write(ev.Key)
 		dataf.Write(ev.Value)
+		dataf.Close()
+		keyf.Close()
 	}
 	return nil
 }
