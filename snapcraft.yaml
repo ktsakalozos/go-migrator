@@ -1,0 +1,22 @@
+name: migrator
+version: "latest"
+summary: Etcd to dqlite migrator
+description: |-
+ Etcd to dqlite migrator
+
+grade: stable
+confinement: classic
+base: core
+
+apps:
+  migrator:
+    command: bin/migrator
+
+parts:
+  migrator:
+    source: .
+    source-type: git
+    plugin: go
+    go-importpath: github.com/ktsakalozos/go-migrator
+    build-packages:
+      - gcc

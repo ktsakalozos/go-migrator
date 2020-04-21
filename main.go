@@ -31,7 +31,7 @@ func main() {
 		cli.StringFlag{
 			Name: "endpoint",
 			// Value:       "http://127.0.0.1:12379",
-			Value:       "unix:///var/snap/microk8s/1314/var/kubernetes/backend/kine.sock",
+			Value:       "unix:///var/snap/microk8s/current/var/kubernetes/backend/kine.sock",
 			Destination: &endpoint,
 		},
 		cli.StringFlag{
