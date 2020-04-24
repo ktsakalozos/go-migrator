@@ -16,17 +16,21 @@ import (
 )
 
 var (
-	mode     string
-	endpoint string
-	db       string
+	mode          string
+	endpoint      string
+	etcd_direct   string
+	dqlite_direct string
+	db            string
 )
 
 func main() {
 	app := cli.NewApp()
 	app.Name = "migrator"
 	app.Description = "Tool to migrate etcd to dqlite"
-	app.UsageText = "copy etcd data to kine"
-	app.UsageText = "migrator --mode [backup|restore] --endpoint [etcd or kine endpoint] --db-dir [dir to store entries]"
+	app.UsageText = "Copy etcd data to kine\n" +
+	                "migrator --mode [backup|restore] --endpoint [etcd or kine endpoint] --db-dir [dir to store entries]\n" +
+	                "OR\n" +
+	                "migrator --mode direct --etcd-direct [etcd endpoint] --dqlite-direct [kine endpoint]"
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name: "endpoint",
@@ -35,9 +39,20 @@ func main() {
 			Destination: &endpoint,
 		},
 		cli.StringFlag{
+			Name: "etcd-direct",
+			Value:       "http://127.0.0.1:12379",
+			Destination: &etcd_direct,
+		},
+		cli.StringFlag{
+			Name: "dqlite-direct",
+			Value:       "unix:///var/snap/microk8s/current/var/kubernetes/backend/kine.sock",
+			Destination: &dqlite_direct,
+		},
+		cli.StringFlag{
 			Name:  "mode",
 			Value: "backup",
 			//Value:       "restore",
+			//Value:       "direct",
 			Destination: &mode,
 		},
 		cli.StringFlag{
@@ -63,7 +78,7 @@ func check(e error) {
 func backup(ep string, dir string) error {
 	ctx := context.Background()
 	cli, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{endpoint},
+		Endpoints: []string{ep},
 	})
 	check(err)
 	defer cli.Close()
@@ -94,7 +109,7 @@ func backup(ep string, dir string) error {
 func restore(ep string, dir string) error {
 	ctx := context.Background()
 	etcdcfg := kineep.ETCDConfig{
-		Endpoints:   []string{endpoint},
+		Endpoints:   []string{ep},
 		LeaderElect: false,
 	}
 	c, err := client.New(etcdcfg)
@@ -132,6 +147,41 @@ func restore(ep string, dir string) error {
 	return nil
 }
 
+func direct(etcd_direct string, dqlite_direct string) error {
+	ctx_dqlite := context.Background()
+	dqlite_cfg := kineep.ETCDConfig{
+		Endpoints:   []string{dqlite_direct},
+		LeaderElect: false,
+	}
+	dqlite, err := client.New(dqlite_cfg)
+	check(err)
+	defer dqlite.Close()
+
+	ctx_etcd := context.Background()
+	etcd, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{etcd_direct},
+	})
+	check(err)
+	defer etcd.Close()
+	resp, err := etcd.Get(ctx_etcd, "", clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortDescend))
+	check(err)
+
+	for i, ev := range resp.Kvs {
+		logrus.Debugf("%d) %s", i, ev.Key)
+		err = dqlite.Create(ctx_dqlite, string(ev.Key), ev.Value)
+		if err != nil {
+			if err.Error() == "key exists" {
+				err = dqlite.Put(ctx_dqlite, string(ev.Key), ev.Value)
+				check(err)
+			} else {
+				panic(err)
+			}
+		}
+		i++
+	}
+	return nil
+}
+
 func run(c *cli.Context) {
 	if c.Bool("debug") {
 		logrus.SetLevel(logrus.DebugLevel)
@@ -145,6 +195,11 @@ func run(c *cli.Context) {
 		}
 	} else if mode == "restore" {
 		err := restore(endpoint, db)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+	} else if mode == "direct" {
+		err := direct(etcd_direct, dqlite_direct)
 		if err != nil {
 			logrus.Fatal(err)
 		}
