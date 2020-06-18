@@ -28,7 +28,7 @@ func main() {
 	app.Name = "migrator"
 	app.Description = "Tool to migrate etcd to dqlite"
 	app.UsageText = "Copy etcd data to kine\n" +
-	                "migrator --mode [backup|restore] --endpoint [etcd or kine endpoint] --db-dir [dir to store entries]\n" +
+	                "migrator --mode [backup-etcd|restore-to-dqlite|backup-dqlite|restore-to-etcd] --endpoint [etcd or kine endpoint] --db-dir [dir to store entries]\n" +
 	                "OR\n" +
 	                "migrator --mode direct --etcd-direct [etcd endpoint] --dqlite-direct [kine endpoint]"
 	app.Flags = []cli.Flag{
@@ -75,7 +75,7 @@ func check(e error) {
 	}
 }
 
-func backup(ep string, dir string) error {
+func backup_etcd(ep string, dir string) error {
 	ctx := context.Background()
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
@@ -106,7 +106,7 @@ func backup(ep string, dir string) error {
 	return nil
 }
 
-func restore(ep string, dir string) error {
+func restore_to_dqlite(ep string, dir string) error {
 	ctx := context.Background()
 	etcdcfg := kineep.ETCDConfig{
 		Endpoints:   []string{ep},
@@ -146,6 +146,76 @@ func restore(ep string, dir string) error {
 	}
 	return nil
 }
+
+func backup_dqlite(ep string, dir string) error {
+	ctx := context.Background()
+	etcdcfg := kineep.ETCDConfig{
+		Endpoints:   []string{ep},
+		LeaderElect: false,
+	}
+	c, err := client.New(etcdcfg)
+	check(err)
+	defer c.Close()
+
+    resp, err := c.List(ctx, "/", 0)
+	check(err)
+
+	err = os.Mkdir(db, 0700)
+	check(err)
+
+	for i, kv := range resp {
+		logrus.Debugf("%d) %s\n", i, kv.Key)
+        data, err := c.Get(ctx, string(kv.Key))
+        check(err)
+
+		var keyfile = db + "/" + strconv.Itoa(i) + ".key"
+		var datafile = db + "/" + strconv.Itoa(i) + ".data"
+		keyf, err := os.Create(keyfile)
+		check(err)
+		defer keyf.Close()
+		dataf, err := os.Create(datafile)
+		check(err)
+		defer dataf.Close()
+		keyf.Write(kv.Key)
+		dataf.Write(data.Data)
+		dataf.Close()
+		keyf.Close()
+	}
+
+	return nil
+}
+
+
+func restore_to_etcd(ep string, dir string) error {
+	ctx := context.Background()
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{ep},
+	})
+	check(err)
+	defer cli.Close()
+
+	var i = 0
+	for true {
+		var keyfile = db + "/" + strconv.Itoa(i) + ".key"
+		var datafile = db + "/" + strconv.Itoa(i) + ".data"
+		_, err := os.Stat(keyfile)
+		if os.IsNotExist(err) {
+			fmt.Printf("Processed %d entries", i)
+			break
+		}
+
+		keybytes, err := ioutil.ReadFile(keyfile)
+		check(err)
+		databytes, err := ioutil.ReadFile(datafile)
+		check(err)
+
+        _, err = cli.Put(ctx, string(keybytes), string(databytes))
+		check(err)
+		i++
+	}
+	return nil
+}
+
 
 func direct(etcd_direct string, dqlite_direct string) error {
 	ctx_dqlite := context.Background()
@@ -188,13 +258,23 @@ func run(c *cli.Context) {
 	}
 
 	logrus.Infof("mode: %s, endpoint: %s, dir: %s", mode, endpoint, db)
-	if mode == "backup" {
-		err := backup(endpoint, db)
+	if mode == "backup" || mode == "backup-etcd" {
+		err := backup_etcd(endpoint, db)
 		if err != nil {
 			logrus.Fatal(err)
 		}
-	} else if mode == "restore" {
-		err := restore(endpoint, db)
+	} else if mode == "restore" || mode == "restore-to-dqlite" {
+		err := restore_to_dqlite(endpoint, db)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+	} else if mode == "backup-dqlite" {
+		err := backup_dqlite(endpoint, db)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+	} else if mode == "restore-to-etcd" {
+		err := restore_to_etcd(endpoint, db)
 		if err != nil {
 			logrus.Fatal(err)
 		}

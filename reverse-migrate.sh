@@ -12,14 +12,8 @@ SNAP_DATA=/var/snap/microk8s/current/
 
 microk8s.stop
 
-cp "$SNAP_DATA"/args/etcd "$SNAP_DATA"/args/etcd.backup
-cat <<EOT > "$SNAP_DATA"/args/etcd
---data-dir=\${SNAP_COMMON}/var/run/etcd
---advertise-client-urls=http://127.0.0.1:12379
---listen-client-urls=http://0.0.0.0:12379
---enable-v2=true
-EOT
-
+microk8s.enable ha-cluster
+microk8s.enable dashboard
 
 cp "$SNAP_DATA"/args/kube-apiserver "$SNAP_DATA"/args/kube-apiserver.backup
 cat <<EOT > "$SNAP_DATA"/args/kube-apiserver
@@ -50,15 +44,31 @@ cat <<EOT > "$SNAP_DATA"/args/kube-apiserver
 --allow-privileged=true
 EOT
 
-systemctl start snap.microk8s.daemon-etcd
 systemctl start snap.microk8s.daemon-apiserver
 
 # TODO do some proper wait here
 sleep 10
 
 rm -rf db
-./migrator --mode backup-etcd --endpoint "http://127.0.0.1:12379" --db-dir db --debug
-./migrator --mode restore-to-dqlite --endpoint "unix:///var/snap/microk8s/current/var/kubernetes/backend/kine.sock" --db-dir db --debug
+./migrator --mode backup-dqlite --endpoint "unix:///var/snap/microk8s/current/var/kubernetes/backend/kine.sock" --db-dir db --debug
+
+microk8s.disable ha-cluster
+
+
+cp "$SNAP_DATA"/args/etcd "$SNAP_DATA"/args/etcd.backup
+cat <<EOT > "$SNAP_DATA"/args/etcd
+--data-dir=\${SNAP_COMMON}/var/run/etcd
+--advertise-client-urls=http://127.0.0.1:12379
+--listen-client-urls=http://0.0.0.0:12379
+--enable-v2=true
+EOT
+systemctl restart snap.microk8s.daemon-etcd
+sleep 20
+./migrator --mode restore-to-etcd --endpoint "http://127.0.0.1:12379" --db-dir db --debug
+
+
+cp "$SNAP_DATA"/args/kube-apiserver.backup "$SNAP_DATA"/args/kube-apiserver
+cp "$SNAP_DATA"/args/etcd.backup "$SNAP_DATA"/args/etcd
 
 sleep 10
 microk8s.start
