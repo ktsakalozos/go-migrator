@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/rancher/kine/pkg/client"
 	kineep "github.com/rancher/kine/pkg/endpoint"
@@ -28,9 +29,9 @@ func main() {
 	app.Name = "migrator"
 	app.Description = "Tool to migrate etcd to dqlite"
 	app.UsageText = "Copy etcd data to kine\n" +
-	                "migrator --mode [backup-etcd|restore-to-dqlite|backup-dqlite|restore-to-etcd] --endpoint [etcd or kine endpoint] --db-dir [dir to store entries]\n" +
-	                "OR\n" +
-	                "migrator --mode direct --etcd-direct [etcd endpoint] --dqlite-direct [kine endpoint]"
+		"migrator --mode [backup-etcd|restore-to-dqlite|backup-dqlite|restore-to-etcd] --endpoint [etcd or kine endpoint] --db-dir [dir to store entries]\n" +
+		"OR\n" +
+		"migrator --mode direct --etcd-direct [etcd endpoint] --dqlite-direct [kine endpoint]"
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name: "endpoint",
@@ -39,12 +40,12 @@ func main() {
 			Destination: &endpoint,
 		},
 		cli.StringFlag{
-			Name: "etcd-direct",
+			Name:        "etcd-direct",
 			Value:       "http://127.0.0.1:12379",
 			Destination: &etcd_direct,
 		},
 		cli.StringFlag{
-			Name: "dqlite-direct",
+			Name:        "dqlite-direct",
 			Value:       "unix:///var/snap/microk8s/current/var/kubernetes/backend/kine.sock",
 			Destination: &dqlite_direct,
 		},
@@ -106,6 +107,26 @@ func backup_etcd(ep string, dir string) error {
 	return nil
 }
 
+func put_key(c client.Client, ctx context.Context, key string, databytes []byte) {
+	err := c.Create(ctx, key, databytes)
+	if err != nil {
+		if err.Error() == "key exists" {
+			var attempts = 1
+			for attempts < 5 {
+				err = c.Put(ctx, key, databytes)
+				if err == nil {
+					break
+				}
+				attempts++
+				time.Sleep(50 * time.Millisecond)
+			}
+			check(err)
+		} else {
+			panic(err)
+		}
+	}
+}
+
 func restore_to_dqlite(ep string, dir string) error {
 	ctx := context.Background()
 	etcdcfg := kineep.ETCDConfig{
@@ -133,15 +154,7 @@ func restore_to_dqlite(ep string, dir string) error {
 		check(err)
 
 		logrus.Debugf("%d) %s", i, key)
-		err = c.Create(ctx, key, databytes)
-		if err != nil {
-			if err.Error() == "key exists" {
-				err = c.Put(ctx, key, databytes)
-				check(err)
-			} else {
-				panic(err)
-			}
-		}
+		put_key(c, ctx, key, databytes)
 		i++
 	}
 	return nil
@@ -157,7 +170,7 @@ func backup_dqlite(ep string, dir string) error {
 	check(err)
 	defer c.Close()
 
-    resp, err := c.List(ctx, "/", 0)
+	resp, err := c.List(ctx, "/", 0)
 	check(err)
 
 	err = os.Mkdir(db, 0700)
@@ -165,8 +178,8 @@ func backup_dqlite(ep string, dir string) error {
 
 	for i, kv := range resp {
 		logrus.Debugf("%d) %s\n", i, kv.Key)
-        data, err := c.Get(ctx, string(kv.Key))
-        check(err)
+		data, err := c.Get(ctx, string(kv.Key))
+		check(err)
 
 		var keyfile = db + "/" + strconv.Itoa(i) + ".key"
 		var datafile = db + "/" + strconv.Itoa(i) + ".data"
@@ -184,7 +197,6 @@ func backup_dqlite(ep string, dir string) error {
 
 	return nil
 }
-
 
 func restore_to_etcd(ep string, dir string) error {
 	ctx := context.Background()
@@ -209,13 +221,12 @@ func restore_to_etcd(ep string, dir string) error {
 		databytes, err := ioutil.ReadFile(datafile)
 		check(err)
 
-        _, err = cli.Put(ctx, string(keybytes), string(databytes))
+		_, err = cli.Put(ctx, string(keybytes), string(databytes))
 		check(err)
 		i++
 	}
 	return nil
 }
-
 
 func direct(etcd_direct string, dqlite_direct string) error {
 	ctx_dqlite := context.Background()
