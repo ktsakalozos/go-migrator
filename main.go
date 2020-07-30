@@ -29,7 +29,7 @@ func main() {
 	app.Name = "migrator"
 	app.Description = "Tool to migrate etcd to dqlite"
 	app.UsageText = "Copy etcd data to kine\n" +
-		"migrator --mode [backup-etcd|restore-to-dqlite|backup-dqlite|restore-to-etcd] --endpoint [etcd or kine endpoint] --db-dir [dir to store entries]\n" +
+		"migrator --mode [backup-etcd|restore-etcd|backup-dqlite|restore-dqlite] --endpoint [etcd or kine endpoint] --db-dir [dir to store entries]\n" +
 		"OR\n" +
 		"migrator --mode direct --etcd-direct [etcd endpoint] --dqlite-direct [kine endpoint]"
 	app.Flags = []cli.Flag{
@@ -274,7 +274,7 @@ func run(c *cli.Context) {
 		if err != nil {
 			logrus.Fatal(err)
 		}
-	} else if mode == "restore" || mode == "restore-to-dqlite" {
+	} else if mode == "restore" || mode == "restore-to-dqlite" || mode == "restore-dqlite" {
 		err := restore_to_dqlite(endpoint, db)
 		if err != nil {
 			logrus.Fatal(err)
@@ -284,7 +284,7 @@ func run(c *cli.Context) {
 		if err != nil {
 			logrus.Fatal(err)
 		}
-	} else if mode == "restore-to-etcd" {
+	} else if mode == "restore-to-etcd" || mode == "restore-etcd" {
 		err := restore_to_etcd(endpoint, db)
 		if err != nil {
 			logrus.Fatal(err)
